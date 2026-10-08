@@ -7,33 +7,70 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-DATA_FILE = Path(__file__).with_name("defbuffer1_1006_202917(in).csv")
-OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C.png")
-LOG_OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C_log.png")
-FIT_OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C_fit.png")
-RS_FIT_OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C_fit_Rs.png")
-JUNCTION_OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C_junction.png")
-LOCAL_N_OUTPUT_FILE = Path(__file__).with_name("IV_Curve_25C_local_n.png")
+DATA_FILES = [
+    # Path(__file__).with_name("6_Oct_IV_25C.csv"),  # current sweep, voltage measured
+    Path(__file__).with_name("8_Oct_IV_25C.csv"),  # voltage sweep, current measured
+    Path(__file__).with_name("8_Oct_IV_25C_Version2.csv"),  # voltage sweep, current measured
+    Path(__file__).with_name("8_Oct_IV_25C_GaAs_LED.csv"),  # voltage sweep, current measured
+    Path(__file__).with_name("8_Oct_IV_25C_GaAs_LED_Version2.csv"),  # voltage sweep, current measured
+]
+# Plots go to plots/<csv name>/, e.g. plots/8_Oct_IV_25C/8_Oct_IV_25C_fit.png
+PLOTS_DIR = Path(__file__).with_name("plots")
 
 T_KELVIN = 298.15  # 25 °C
 K_B_OVER_Q = 8.617333262e-5  # V/K
 
-# The first point (80 µA, straight after the 0 A step) is an outlier.
-MIN_CURRENT_A = 0.15e-3
-# Eq. (4) fit window (A): the only range where the measured local ideality factor
-# is close to a textbook value (n_id ≈ 2).
-FIT_RANGE_A = (MIN_CURRENT_A, 0.55e-3)
-# Eq. (4) + R_s fit window (A). Above ~7 mA the measured V falls increasingly below
-# the model (constant n_id, R_s and T no longer hold, e.g. self-heating).
-RS_FIT_RANGE_A = (MIN_CURRENT_A, 7e-3)
-# Alternative windows, used to estimate the systematic error from the choice of range
-WINDOW_LOWS_A = (0.0, MIN_CURRENT_A, 0.25e-3)
-WINDOW_HIGHS_A = (0.45e-3, 0.55e-3, 0.65e-3)
-RS_WINDOW_HIGHS_A = (3e-3, 5e-3, 7e-3)
+# Per-file analysis settings, keyed by CSV name:
+#   offset_window_v  voltages (V) where the device passes no measurable current, so the
+#                    measured current there is the SMU's zero offset; its median is
+#                    subtracted from all currents before the fit and the local ideality
+#                    plot. None: no offset correction.
+#   fit_range_a      Eq. (4) fit window (A), where the local ideality factor is flat.
+#   window_lows_a, window_highs_a
+#                    alternative fit windows (A), used to estimate the systematic error
+#                    from the choice of range.
+LED_SETTINGS = dict(
+    offset_window_v=None,
+    # 0.15 mA: on 6 Oct the first point (80 µA, straight after the 0 A step) is an outlier
+    fit_range_a=(0.15e-3, 0.55e-3),
+    window_lows_a=(0.0, 0.15e-3, 0.25e-3),
+    window_highs_a=(0.45e-3, 0.55e-3, 0.65e-3),
+)
+SETTINGS = {
+    "6_Oct_IV_25C.csv": LED_SETTINGS,
+    # The LED passes < ~30 pA up to 1.05 V (from the fit), but the SMU reads ~-1.2 nA there
+    "8_Oct_IV_25C.csv": {**LED_SETTINGS, "offset_window_v": (0.1, 1.05)},
+    # Conducts from ~0.1 V with n_id = 1.00 at 1-100 µA. No offset correction needed:
+    # it reads -0.02 nA at 0 V, against 2 nA at the first step (2 mV).
+    "8_Oct_IV_25C_Version2.csv": dict(
+        offset_window_v=None,
+        fit_range_a=(2e-6, 5e-5),
+        window_lows_a=(1e-6, 2e-6, 5e-6),
+        window_highs_a=(2e-5, 5e-5, 1e-4),
+    ),
+    # Reads ~-2.0 nA up to 0.35 V on the 100 nA range (the 0 V point, on the 1 µA
+    # range, reads -0.3 nA and is left out); the diode itself passes < ~0.05 nA there.
+    # The local n_id slides from 1.75 (0.1 µA) to 1.48 (3 mA) with no true plateau;
+    # 5-60 µA (0.85-0.95 V) is the flattest stretch.
+    "8_Oct_IV_25C_GaAs_LED.csv": dict(
+        offset_window_v=(0.01, 0.35),
+        fit_range_a=(5e-6, 6e-5),
+        window_lows_a=(2e-6, 5e-6, 1e-5),
+        window_highs_a=(3e-5, 6e-5, 1e-4),
+    ),
+}
+# Same LED, measured again. Every step at which the SMU autoranged down to 100 nA
+# (78 of 245) reads back a bogus -1.1 to -1.3 V, +27-50 nA; the sweep-order filter
+# in analyse() drops them.
+SETTINGS["8_Oct_IV_25C_GaAs_LED_Version2.csv"] = SETTINGS["8_Oct_IV_25C_GaAs_LED.csv"]
+# Lowest (offset-corrected) current in the local ideality plot (A). On 8 Oct the
+# offset drifts by ~0.2 nA over the sweep (-1.3 nA at 0.5 V, -1.0 nA at 1.05 V), so
+# the corrected current is only good to ~0.2 nA and n_id needs I >> that.
+LOCAL_N_MIN_CURRENT_A = 2e-9
 
 NID = r"$n_\mathrm{id}$"  # ideality factor (not n_i, the intrinsic carrier density)
 
-BLUE, ORANGE = "#2a78d6", "#eb6834"
+BLUE = "#2a78d6"
 INK, MUTED, GRID, FAINT = "#0b0b0b", "#52514e", "#e6e5e0", "#b8b7b0"
 
 
@@ -41,60 +78,71 @@ def load_iv(path):
     """Return (voltage [V], current [A]) lists from a Keithley defbuffer CSV.
 
     The file starts with buffer metadata; the data table begins at the row whose
-    first cell is "Reading". "Reading" is the measured voltage and "Value" is the
-    sourced current.
+    first cell is "Reading". "Reading" is the measured quantity and "Value" the
+    sourced one, each followed by its unit: a current sweep (6 Oct) measures
+    voltage, a voltage sweep (8 Oct) measures current.
     """
     voltage, current = [], []
     with open(path, newline="") as f:
         rows = csv.reader(f)
         for row in rows:
             if row and row[0] == "Reading":
-                v_col, i_col = 0, row.index("Value")
+                read_col, value_col = 0, row.index("Value")
                 break
         else:
             raise ValueError(f"No 'Reading' header row found in {path}")
 
         for row in rows:
-            if len(row) <= i_col or not row[v_col]:
+            if len(row) <= value_col + 1 or not row[read_col]:
                 continue
-            voltage.append(float(row[v_col]))
-            current.append(float(row[i_col]))
+            columns = {row[read_col + 1]: float(row[read_col]),
+                       row[value_col + 1]: float(row[value_col])}
+            voltage.append(columns["Volt DC"])
+            current.append(columns["Amp DC"])
     return voltage, current
 
 
-def fit_shockley(voltage, current, temperature=T_KELVIN, series_resistance=False):
-    """Fit the generalised Shockley equation, eq. (4) of the lab script.
+def current_offset(voltage, current, window):
+    """Zero offset of the current measurement: (median, spread, N) of the current in window (V).
 
-    I = I0 exp(q(V - I R_s) / (n_id kB T)) rearranges to
-        V = (n_id kT/q) ln I - (n_id kT/q) ln I0 + R_s I,
-    which is linear in its parameters, so ordinary least squares gives them and
-    their covariance directly. With series_resistance=False, R_s = 0 and this is
-    the straight line of eq. (4) in ln I. V is the dependent variable because the
-    current was sourced (precise) and the voltage measured (noisy). The -1 term is
-    dropped, valid since I >> I0 everywhere in the data.
+    Returns zero offset if there is no window or no points in it.
     """
     v, i = np.asarray(voltage), np.asarray(current)
-    columns = [np.log(i), np.ones_like(i)] + ([i] if series_resistance else [])
-    design = np.column_stack(columns)
+    if window is None:
+        return 0.0, 0.0, 0
+    s = (v >= window[0]) & (v <= window[1])
+    if not s.any():
+        return 0.0, 0.0, 0
+    return np.median(i[s]), np.std(i[s]), int(s.sum())
+
+
+def fit_shockley(voltage, current, temperature=T_KELVIN):
+    """Fit the generalised Shockley equation, eq. (4) of the lab script.
+
+    I = I0 exp(qV / (n_id kB T)) rearranges to
+        V = (n_id kT/q) ln I - (n_id kT/q) ln I0,
+    a straight line in ln I, so ordinary least squares gives the parameters and
+    their covariance directly. V is the dependent variable because the current was
+    sourced (precise) and the voltage measured (noisy). The -1 term is dropped,
+    valid as long as I >> I0 in the fit window.
+    """
+    v, i = np.asarray(voltage), np.asarray(current)
+    design = np.column_stack([np.log(i), np.ones_like(i)])
     p, *_ = np.linalg.lstsq(design, v, rcond=None)
     resid = v - design @ p
     cov = (resid @ resid / (len(v) - len(p))) * np.linalg.inv(design.T @ design)
 
-    a, b = p[:2]
+    a, b = p
     vt = K_B_OVER_Q * temperature
     grad = np.array([b / a**2, -1 / a])  # d(ln I0)/d(a, b), with ln I0 = -b/a
-    fit = {
+    return {
         "n_id": a / vt,
         "n_id_err": np.sqrt(cov[0, 0]) / vt,
         "ln_I0": -b / a,
-        "ln_I0_err": np.sqrt(grad @ cov[:2, :2] @ grad),
+        "ln_I0_err": np.sqrt(grad @ cov @ grad),
         "rms_V": np.sqrt(np.mean(resid**2)),
         "N": len(v),
     }
-    if series_resistance:
-        fit["Rs"] = p[2]
-        fit["Rs_err"] = np.sqrt(cov[2, 2])
-    return fit
 
 
 def local_ideality(voltage, current, temperature=T_KELVIN):
@@ -106,23 +154,19 @@ def local_ideality(voltage, current, temperature=T_KELVIN):
     return np.gradient(voltage, np.log(current)) / (K_B_OVER_Q * temperature)
 
 
-def junction_voltage(voltage, current, fit):
-    return voltage - current * fit.get("Rs", 0.0)
-
-
 def model_voltage(current, fit, temperature=T_KELVIN):
     vt = K_B_OVER_Q * temperature
-    return fit["n_id"] * vt * (np.log(current) - fit["ln_I0"]) + fit.get("Rs", 0.0) * current
+    return fit["n_id"] * vt * (np.log(current) - fit["ln_I0"])
 
 
-def window_fits(v, i, highs, series_resistance=False):
+def window_fits(v, i, lows, highs):
     """Fits over the alternative windows (systematic uncertainty from the range choice)."""
     fits = []
-    for lo in WINDOW_LOWS_A:
+    for lo in lows:
         for hi in highs:
             s = (i > lo) & (i <= hi)
-            if s.sum() > 2 + series_resistance:  # need a residual degree of freedom
-                fits.append(fit_shockley(v[s], i[s], series_resistance=series_resistance))
+            if s.sum() > 2:  # need a residual degree of freedom
+                fits.append(fit_shockley(v[s], i[s]))
     return fits
 
 
@@ -141,8 +185,6 @@ def plot_fit(v, i, fit, fits, fit_range, title, path):
     """Measured ln I vs V with the fitted curve, and the voltage residuals below."""
     in_fit = (i > fit_range[0]) & (i <= fit_range[1])
     ln_i = np.log(i)
-    with_rs = "Rs" in fit
-    name = "Eq. (4) + Rₛ" if with_rs else "Eq. (4)"
 
     fig, (ax, ax_res) = plt.subplots(
         2, 1, figsize=(7, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
@@ -155,20 +197,17 @@ def plot_fit(v, i, fit, fits, fit_range, title, path):
     for mask, ls in ((inside, "-"), (~inside, "--")):
         ax.plot(model_voltage(i_line[mask], fit), np.log(i_line[mask]),
                 color=INK, lw=1.5, ls=ls, zorder=4,
-                label=f"Fit: {name}" if ls == "-" else f"{name} extrapolated")
+                label="Fit: Eq. (4)" if ls == "-" else "Eq. (4) extrapolated")
 
     vt = K_B_OVER_Q * T_KELVIN
     n_lo, n_hi = spread(fits, "n_id")
-    lines = [f"Fit {fit_range[0]*1e3:g}–{fit_range[1]*1e3:g} mA, T = {T_KELVIN} K"]
-    if not with_rs:
-        lines.append(f"slope q/({NID} kT) = {1 / (fit['n_id'] * vt):.1f} V⁻¹")
-    lines.append(f"{NID} = {fit['n_id']:.2f} ± {fit['n_id_err']:.2f} (stat), "
-                 f"{n_lo:.1f}–{n_hi:.1f} over windows")
-    lines.append(f"I₀ = {np.exp(fit['ln_I0']):.1e} A  (ln I₀ = {fit['ln_I0']:.1f} ± {fit['ln_I0_err']:.1f})")
-    if with_rs:
-        rs_lo, rs_hi = spread(fits, "Rs")
-        lines.append(f"Rₛ = {fit['Rs']:.1f} ± {fit['Rs_err']:.1f} Ω (stat), "
-                     f"{rs_lo:.0f}–{rs_hi:.0f} Ω over windows")
+    lines = [
+        f"Fit {fit_range[0]*1e3:g}–{fit_range[1]*1e3:g} mA, T = {T_KELVIN} K",
+        f"slope q/({NID} kT) = {1 / (fit['n_id'] * vt):.1f} V⁻¹",
+        f"{NID} = {fit['n_id']:.2f} ± {fit['n_id_err']:.2f} (stat), "
+        f"{n_lo:.1f}–{n_hi:.1f} over windows",
+        f"I₀ = {np.exp(fit['ln_I0']):.1e} A  (ln I₀ = {fit['ln_I0']:.1f} ± {fit['ln_I0_err']:.1f})",
+    ]
     ax.text(0.03, 0.97, "\n".join(lines),
             transform=ax.transAxes, va="top", fontsize=9, color=INK,
             bbox=dict(facecolor="white", edgecolor=GRID))
@@ -191,53 +230,20 @@ def plot_fit(v, i, fit, fits, fit_range, title, path):
     fig.savefig(path, dpi=200)
 
 
-def plot_junction(v, i, fit, fit_range, path):
-    """ln I against the junction voltage V - I R_s, with the straight line of eq. (4)."""
-    vt = K_B_OVER_Q * T_KELVIN
-
+def plot_local_ideality(v, i, fit_range, path):
+    """Local ideality factor against voltage."""
+    in_fit = (i > fit_range[0]) & (i <= fit_range[1])
     fig, ax = plt.subplots(figsize=(7, 5))
-    ax.scatter(junction_voltage(v, i, fit), np.log(i), s=14, color=ORANGE, zorder=3,
-               label="Junction voltage V − IRₛ")
-
-    ln_line = np.log(np.geomspace(i.min(), i.max(), 400))
-    inside = ln_line <= np.log(fit_range[1])
-    for mask, ls in ((inside, "-"), (~inside, "--")):
-        ax.plot(fit["n_id"] * vt * (ln_line[mask] - fit["ln_I0"]), ln_line[mask],
-                color=INK, lw=1.5, ls=ls, zorder=4,
-                label=f"Eq. (4): ln I = ln I₀ + qV/({NID} kT)" if ls == "-" else "Eq. (4) extrapolated")
-
-    ax.text(0.03, 0.97,
-            f"Rₛ = {fit['Rs']:.1f} Ω subtracted (fit {fit_range[0]*1e3:g}–{fit_range[1]*1e3:g} mA)\n"
-            f"slope q/({NID} kT) = {1 / (fit['n_id'] * vt):.1f} V⁻¹  →  {NID} = {fit['n_id']:.2f}\n"
-            f"intercept ln I₀ = {fit['ln_I0']:.1f} ± {fit['ln_I0_err']:.1f}",
-            transform=ax.transAxes, va="top", fontsize=9, color=INK,
-            bbox=dict(facecolor="white", edgecolor=GRID))
-    ax.set_title("LED ln(I) vs junction voltage at 25 °C", color=INK)
-    ax.set_xlabel("Junction voltage V − IRₛ (V)", color=MUTED)
-    ax.set_ylabel("ln(I / 1 A)", color=MUTED)
-    ax.legend(loc="lower right", fontsize=9, frameon=False)
-    style(ax)
-
-    fig.tight_layout()
-    fig.savefig(path, dpi=200)
-
-
-def plot_local_ideality(v, i, rs_fit, path):
-    """Local ideality factor against current, from the measured and the junction voltage."""
-    fig, ax = plt.subplots(figsize=(7, 5))
-    ax.axvspan(FIT_RANGE_A[0] * 1e3, FIT_RANGE_A[1] * 1e3, color=GRID, alpha=0.6, zorder=0,
+    ax.axvspan(v[in_fit].min(), v[in_fit].max(), color=GRID, alpha=0.6, zorder=0,
                label="Eq. (4) fit range")
     for n_ref, text in ((1, f"{NID} = 1  diffusion"), (2, f"{NID} = 2  recombination")):
         ax.axhline(n_ref, color=MUTED, lw=1, ls="--", zorder=1)
-        ax.text(i.max() * 1e3, n_ref + 0.15, text, ha="right", va="bottom", fontsize=9, color=MUTED)
-    ax.scatter(i * 1e3, local_ideality(v, i), s=14, color=BLUE, zorder=3,
-               label=f"From measured V: (q/kT) dV/d(ln I)")
-    ax.scatter(i * 1e3, local_ideality(junction_voltage(v, i, rs_fit), i), s=14, color=ORANGE,
-               zorder=3, label=f"From junction V − IRₛ (Rₛ = {rs_fit['Rs']:.1f} Ω)")
+        ax.text(v.max(), n_ref + 0.15, text, ha="right", va="bottom", fontsize=9, color=MUTED)
+    ax.scatter(v, local_ideality(v, i), s=14, color=BLUE, zorder=3,
+               label=f"(q/kT) dV/d(ln I)")
 
-    ax.set_xscale("log")
     ax.set_title("LED local ideality factor at 25 °C", color=INK)
-    ax.set_xlabel("Current (mA, log scale)", color=MUTED)
+    ax.set_xlabel("Voltage (V)", color=MUTED)
     ax.set_ylabel(f"Local ideality factor {NID}", color=MUTED)
     ax.legend(loc="upper left", fontsize=9, frameon=False)
     style(ax)
@@ -253,18 +259,36 @@ def print_fit(label, fit, fits, fit_range):
     print(f"  n_id = {fit['n_id']:.3f} ± {fit['n_id_err']:.3f} (stat); "
           f"{n_lo:.2f}–{n_hi:.2f} over alternative fit windows")
     print(f"  I0   = {np.exp(fit['ln_I0']):.2e} A  (ln I0 = {fit['ln_I0']:.2f} ± {fit['ln_I0_err']:.2f})")
-    if "Rs" in fit:
-        rs_lo, rs_hi = spread(fits, "Rs")
-        print(f"  Rs   = {fit['Rs']:.2f} ± {fit['Rs_err']:.2f} ohm (stat); "
-              f"{rs_lo:.1f}–{rs_hi:.1f} ohm over alternative fit windows")
     print(f"  RMS residual = {fit['rms_V']*1e3:.2f} mV")
 
 
-def main():
-    data_file = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA_FILE
+def analyse(data_file):
+    """Make all the plots and fits for one CSV file."""
+    settings = SETTINGS.get(data_file.name, LED_SETTINGS)
+    fit_range, offset_window = settings["fit_range_a"], settings["offset_window_v"]
     voltage, current = load_iv(data_file)
-    current_mA = [i * 1e3 for i in current]
 
+    out_dir = PLOTS_DIR / data_file.stem
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def output(suffix=""):
+        return out_dir / f"{data_file.stem}{suffix}.png"
+    OUTPUT_FILE, LOG_OUTPUT_FILE = output(), output("_log")
+    FIT_OUTPUT_FILE, LOCAL_N_OUTPUT_FILE = output("_fit"), output("_local_n")
+
+    print(f"\n=== {data_file.name} ===")
+
+    # Drop readings recorded out of sweep order: when changing current range the SMU
+    # sometimes reads back a wrong voltage (8 Oct LED around 1.31 V; GaAs LED -0.62 V
+    # in the middle of the sweep)
+    v_all = np.array(voltage)
+    in_sweep = v_all >= np.maximum.accumulate(v_all)
+    if not in_sweep.all():
+        print(f"Dropped {np.sum(~in_sweep)} points recorded out of sweep order")
+    voltage = list(v_all[in_sweep])
+    current = list(np.array(current)[in_sweep])
+
+    current_mA = [i * 1e3 for i in current]
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.scatter(voltage, current_mA, s=14, color=BLUE, zorder=3)
 
@@ -295,30 +319,42 @@ def main():
     fig_log.savefig(LOG_OUTPUT_FILE, dpi=200)
     print(f"Plotted {len(v_pos)} points -> {LOG_OUTPUT_FILE}")
 
-    # Shockley fits on the forward branch only
+    # Shockley fit on the forward branch only, with the current offset removed
     v, i = np.array(voltage), np.array(current)
-    forward = (v > 0) & (i > 0)
+    offset, offset_spread, n_offset = current_offset(v, i, offset_window)
+    if n_offset:
+        print(f"\nCurrent offset = {offset*1e9:.3f} nA (spread {offset_spread*1e9:.2f} nA, "
+              f"median of {n_offset} points at {offset_window[0]:g}–{offset_window[1]:g} V), "
+              f"subtracted from all currents")
+    else:
+        print("\nNo current offset correction")
+    i = i - offset
+    # Up to the offset window the device passes no measurable current, and corrected
+    # currents within the offset's scatter are noise, not diode current
+    v_min = offset_window[1] if n_offset else 0.0
+    forward = (v > v_min) & (i > 3 * offset_spread) & (i > 0)
     v, i = v[forward], i[forward]
 
-    s = (i > FIT_RANGE_A[0]) & (i <= FIT_RANGE_A[1])
+    s = (i > fit_range[0]) & (i <= fit_range[1])
     fit = fit_shockley(v[s], i[s])
-    fits = window_fits(v, i, WINDOW_HIGHS_A)
-    print_fit("Shockley fit, eq. (4)", fit, fits, FIT_RANGE_A)
+    fits = window_fits(v, i, settings["window_lows_a"], settings["window_highs_a"])
+    print_fit("Shockley fit, eq. (4)", fit, fits, fit_range)
 
-    s = (i > RS_FIT_RANGE_A[0]) & (i <= RS_FIT_RANGE_A[1])
-    rs_fit = fit_shockley(v[s], i[s], series_resistance=True)
-    rs_fits = window_fits(v, i, RS_WINDOW_HIGHS_A, series_resistance=True)
-    print_fit("Shockley fit with series resistance, eq. (4) + Rs", rs_fit, rs_fits, RS_FIT_RANGE_A)
-
-    plot_fit(v, i, fit, fits, FIT_RANGE_A,
+    plot_fit(v, i, fit, fits, fit_range,
              "LED ln(I)–V at 25 °C: Shockley equation fit", FIT_OUTPUT_FILE)
-    plot_fit(v, i, rs_fit, rs_fits, RS_FIT_RANGE_A,
-             "LED ln(I)–V at 25 °C: Shockley fit with series resistance", RS_FIT_OUTPUT_FILE)
-    plot_junction(v, i, rs_fit, RS_FIT_RANGE_A, JUNCTION_OUTPUT_FILE)
-    valid = i > MIN_CURRENT_A
-    plot_local_ideality(v[valid], i[valid], rs_fit, LOCAL_N_OUTPUT_FILE)
-    for path in (FIT_OUTPUT_FILE, RS_FIT_OUTPUT_FILE, JUNCTION_OUTPUT_FILE, LOCAL_N_OUTPUT_FILE):
+    valid = i > LOCAL_N_MIN_CURRENT_A
+    v_n, i_n = v[valid], i[valid]
+    # dV/d(ln I) needs I increasing as well as V
+    in_order = (v_n >= np.maximum.accumulate(v_n)) & (i_n >= np.maximum.accumulate(i_n))
+    plot_local_ideality(v_n[in_order], i_n[in_order], fit_range, LOCAL_N_OUTPUT_FILE)
+    for path in (FIT_OUTPUT_FILE, LOCAL_N_OUTPUT_FILE):
         print(f"Plot -> {path}")
+
+
+def main():
+    data_files = [Path(arg) for arg in sys.argv[1:]] or DATA_FILES
+    for data_file in data_files:
+        analyse(data_file)
     plt.show()
 
 
