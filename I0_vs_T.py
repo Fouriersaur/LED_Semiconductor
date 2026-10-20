@@ -13,10 +13,10 @@ import numpy as np
 
 from IV_Curve_25C import (
     BLUE, FAINT, GAAS_T_SERIES_FILES, GAAS_T_SERIES_K, GRID, INK, K_B_OVER_Q, MUTED, NID,
-    PLOTS_DIR, analyse, style,
+    IV_PLOTS_DIR, analyse, style,
 )
 
-OUTPUT_FILE = PLOTS_DIR / "9_Oct_IV_GaAs_LED_I0_vs_T" / "9_Oct_IV_GaAs_LED_I0_vs_T.png"
+OUTPUT_FILE = IV_PLOTS_DIR / "9_Oct_IV_GaAs_LED_I0_vs_T" / "9_Oct_IV_GaAs_LED_I0_vs_T.png"
 
 
 def fit_arrhenius(T, ln_i0, ln_i0_err, t_power):

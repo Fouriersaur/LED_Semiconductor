@@ -27,7 +27,7 @@ from scipy.optimize import least_squares
 from I0_vs_T import fit_arrhenius, model_ln_i0
 from IV_Curve_25C import (
     BLUE, FAINT, GAAS_T_SERIES_FILES, GAAS_T_SERIES_K, GRID, INK, K_B_OVER_Q, MUTED, ORANGE,
-    PLOTS_DIR, SETTINGS, load_iv, style,
+    IV_PLOTS_DIR, SETTINGS, load_iv, style,
 )
 
 # Fit ranges (A): main window, then the alternative window starts and ends (systematic
@@ -41,7 +41,7 @@ FIT_RANGES = {
                  window_highs_a=(1e-2, 1.5e-2, 2e-2), suffix="_full", label="full sweep, to 20 mA"),
 }
 
-I0_PLOTS_DIR = PLOTS_DIR / "9_Oct_IV_GaAs_LED_I0_vs_T"
+I0_PLOTS_DIR = IV_PLOTS_DIR / "9_Oct_IV_GaAs_LED_I0_vs_T"
 GREEN = "#2e9e5b"
 
 
@@ -226,7 +226,7 @@ def main():
         for t, data_file, (v, i) in zip(T, GAAS_T_SERIES_FILES, sweeps):
             fixed.append(fit_with_windows(v, i, t, 2.0, fit_range))
             free.append(fit_with_windows(v, i, t, None, fit_range))
-            out_dir = PLOTS_DIR / data_file.stem
+            out_dir = IV_PLOTS_DIR / data_file.stem
             out_dir.mkdir(parents=True, exist_ok=True)
             plot_two_diode(v, i, fixed[-1], f"GaAs LED ln(I)–V at {t:g} K: two-diode fit (n₂ = 2)",
                            out_dir / f"{data_file.stem}_fit_two_diode{suffix}.png")

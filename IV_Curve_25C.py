@@ -30,8 +30,9 @@ GAAS_T_SERIES_K = (296.5, 305.7, 314.7, 324.1, 333.5, 342.2, 351.4, 360.3)
 GAAS_T_SERIES_FILES = [GAAS_DIR / "T_series" / f"9_Oct_IV_GaAs_LED_{t:g}K.csv"
                        for t in GAAS_T_SERIES_K]
 DATA_FILES += GAAS_T_SERIES_FILES
-# Plots go to plots/<csv name>/, e.g. plots/8_Oct_IV_25C/8_Oct_IV_25C_fit.png
+# IV plots go to plots/IV/<csv name>/, e.g. plots/IV/8_Oct_IV_25C/8_Oct_IV_25C_fit.png
 PLOTS_DIR = Path(__file__).with_name("plots")
+IV_PLOTS_DIR = PLOTS_DIR / "IV"
 
 T_KELVIN = 298.15  # 25 °C, the default measurement temperature
 K_B_OVER_Q = 8.617333262e-5  # V/K
@@ -432,7 +433,7 @@ def analyse(data_file):
     fit_range, offset_window = settings["fit_range_a"], settings["offset_window_v"]
     voltage, current = load_iv(data_file)
 
-    out_dir = PLOTS_DIR / data_file.stem
+    out_dir = IV_PLOTS_DIR / data_file.stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def output(suffix=""):
