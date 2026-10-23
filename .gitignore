@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Raw pulse CSVs >100 MB (GitHub limit) - kept locally only
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/134P7.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/163P2.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/185P4.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/208P15.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/240P1.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/294P5PU1 2.CSV
+/Preliminary Data and Analysis/data/LED_pulses/22 Oct Pulse Data/99P5.CSV
+/Preliminary Data and Analysis/data/LED_pulses/294P5PU1.CSV
+/Preliminary Data and Analysis/data/LED_pulses/75P9PU08.CSV
